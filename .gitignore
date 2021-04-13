@@ -1,0 +1,115 @@
+# Build tools folder
+building/
+Tools/
+Tool/
+tools/
+tool/
+
+*.egg-info*
+
+#ignore from CMake generated config file 
+source/subsys/configuration/config.h
+
+# Build results
+source/build/
+tests/integration_tests/build/
+
+#testing results
+test-*.xml
+flash_*.jlink
+
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+#*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+#*.launch
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+### CMake ###
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+### CMake Patch ###
+# External projects
+*-prefix/
+
+### Ninja ###
+.ninja_deps
+.ninja_log
+/.metadata/
+/git_devops.7z
+/git_devops.zip
+/source/al2/build
+/source/integration_tests/build
+/scripts/danube/build/al2_fota.bin
+/scripts/danube/build/al2_test_fota.bin
+/scripts/FW_Flasher/firmware_accessor.py
+/source/integration_tests/.tracecompass
+/source/al2/subsys/configuration/config.h
+/scripts/integration_test_code.bin
+/source/al2/subsys/configuration/driver_config.h
+/source/al2/subsys/configuration/config.h
+/scripts/danube/danube.egg-info
