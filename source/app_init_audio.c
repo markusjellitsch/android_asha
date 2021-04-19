@@ -154,10 +154,12 @@ void Audio_Initialize_System(void)
     Reset_Audio_Sync_Param(&env_sync, &env_audio);
 
     // debug pin configuration
-    Sys_DIO_Config(AUDIO_DEBUG_DIO, DIO_MODE_GPIO_OUT_0);
-    Sys_DIO_Config(ASCC_PHASE_ISR_DIO, DIO_MODE_GPIO_OUT_0);
-    Sys_DIO_Config(ASHA_EVENT_DIO, DIO_MODE_GPIO_OUT_0);
-    Sys_GPIO_Set_Low(ASHA_EVENT_DIO);
+    Sys_DIO_Config(GPIO_DBG_PACK_RECV, DIO_MODE_GPIO_OUT_0);
+    Sys_DIO_Config(GPIO_DBG_ASRC_ISR, DIO_MODE_GPIO_OUT_0);
+    Sys_DIO_Config(GPIO_DBG_PACK_STREAM, DIO_MODE_GPIO_OUT_0);
+    Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
+    Sys_GPIO_Set_Low(GPIO_DBG_ASRC_ISR);
+    Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
 
     //  set IRQ priorities
     NVIC_SetPriority(DSP0_IRQn, 2);

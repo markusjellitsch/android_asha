@@ -23,6 +23,7 @@ struct Node
 {
     uint8_t data[ENCODED_FRAME_LENGTH];
     Packet_State packet_state;
+    uint8_t seq_num;
     struct Node *next;
 };
 
@@ -32,13 +33,13 @@ struct queue_t
     struct Node *rear;
 };
 
-void QueueInsert(struct queue_t *queue, const uint8_t *x, Packet_State packet_state);
+void QueueInsert(struct queue_t *queue, const uint8_t *x, Packet_State packet_state,uint8_t seq_num);
 
 void QueueFree(struct queue_t *queue);
 
 void QueueInit(struct queue_t *queue);
 
-uint8_t * QueueFront(struct queue_t *queue, Packet_State * packet_state);
+uint8_t * QueueFront(struct queue_t *queue, Packet_State * packet_state,uint8_t * seq_num);
 
 uint16_t QueueCount(struct queue_t *queue);
 

@@ -123,16 +123,17 @@ int main(void)
 
     TRACE_INIT();
 
-    Sys_DIO_Config(1,DIO_MODE_GPIO_IN_0);
+    Sys_DIO_Config(GPIO_READ_SIDE,DIO_MODE_GPIO_IN_0);
 
 
     Sys_Delay_ProgramROM(SystemCoreClock / 10);
 
     PRINTF("\r\n==============================================\n");
-    if (DIO_DATA->ALIAS[1] == 1)
+    if (DIO_DATA->ALIAS[GPIO_READ_SIDE] == 1)
     {
     	PRINTF("\r\n===== Initializing ble_android_asha RIGHT ====\n");
     	asha_side = ASHA_CAPABILITIES_SIDE_RIGHT;
+
     	devConfigCmd.addr.addr[5] = 0xD6;
     }
     else
@@ -142,7 +143,7 @@ int main(void)
     PRINTF("\r\n==============================================\r\n");
 
     /* Run the following command when erasing flash/bond_list is desirable */
-    BondList_RemoveAll();
+    //BondList_RemoveAll();
 
     /* Configure application-specific advertising data and scan response  data*/
     APP_SetAdvScanData();

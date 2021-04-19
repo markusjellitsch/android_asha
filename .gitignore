@@ -57,6 +57,7 @@ flash_*.jlink
 
 # Debug files
 *.dSYM/
+Debug/
 *.su
 *.idb
 *.pdb

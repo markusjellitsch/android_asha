@@ -91,12 +91,12 @@ extern "C"
 #endif /* EZAIRO_71XX_DIO_CFG */
 
 /* DIO that is used to check ASCC phase ISR */
-#define ASCC_PHASE_ISR_DIO              1
+#define GPIO_DBG_ASRC_ISR              		0
 
 /* DIO that is used to check MFi ISR */
-#define ASHA_EVENT_DIO                  2
+#define GPIO_DBG_PACK_STREAM              	2
 
-#define AUDIO_DEBUG_DIO                 3
+#define GPIO_DBG_PACK_RECV                 	3
 
 /* Connection interval times used to change the state of the audio path
  * Disconnect -> Transient -> Established */
@@ -218,7 +218,7 @@ extern LPDSP32Context lpdsp32;
 #define SIMUL                   0
 
 #define TIMER_SIMUL             1
-#define TIMER_REGUL             2
+#define TIMER_START_STREAM      2
 #define TIMER_RENDER            3
 
 /* DMA for ASRC input on RX side */
@@ -279,7 +279,7 @@ void LEA_Event_Handler(uint8_t *rxBuf, uint8_t *txBuf, bool invalid_rx,
 
 void Audio_Initialize_System(void);
 
-void TIMER_IRQ_FUNC(TIMER_REGUL)(void);
+void TIMER_IRQ_FUNC(TIMER_START_STREAM)(void);
 
 void TIMER_IRQ_FUNC(TIMER_RENDER) (void);
 

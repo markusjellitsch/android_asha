@@ -210,8 +210,6 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
                 PRINTF("%d ", p->peer_addr.addr[i]);
             PRINTF("\r\n  ADDR_TYPE: %d", p->peer_addr_type);
 
-            Sys_GPIO_Set_Low(0);
-
 #if CFG_BOND_LIST_IN_NVR2
             if(GAP_IsAddrPrivateResolvable(p->peer_addr.addr, p->peer_addr_type) &&
                BondList_Size() > 0)

@@ -33,6 +33,7 @@ uint32_t cntr = 0;
 uint32_t cntr_coded = 0;
 int8_t volumeShift = 0;
 uint8_t seqNum_prev;
+uint8_t seqNum_prev_stream;
 
 sync_param_t env_sync;
 audio_frame_param_t env_audio;
@@ -42,8 +43,9 @@ struct queue_t audio_queue;
 /* Enable / disable PLC feature */
 bool plc_enable = true;
 
-volatile bool m_buffer_filling_completed = 0;
-uint8_t m_cur_seq_num = 0;
+static bool m_start_rendering = 0;
+
+
 
 /* ----------------------------------------------------------------------------
  * Function      : void APP_Audio_Transfer(const uint8_t *audio_buff,
@@ -55,19 +57,28 @@ uint8_t m_cur_seq_num = 0;
  *                 seqNum        -
  * Outputs       : None
  * Assumptions   : None
- * ------------------------------------------------------------------------- */
+ * -------------------------------------------------------------------
+ * ------ */
 void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqNum)
 {
     uint8_t i;
 
-    // TODO: the ASHA seq. num is actually ignored here. Why?
-    if (((uint8_t) (seqNum - seqNum_prev - 1)) != 0)
-    {
-        //PRINTF("\r\n APP_Audio_Transfer: seqNum_prev = %d, seqNum = %d\r\n", seqNum_prev, seqNum);
+    Sys_GPIO_Toggle(GPIO_DBG_ASRC_ISR);
+
+
+    if( ((uint8_t) (seqNum - seqNum_prev - 1)) != 0 ) {
+        PRINTF("\r\n APP_Audio_Transfer: seqNum_prev = %d, seqNum = %d\r\n", seqNum_prev, seqNum);
     }
 
+    // sync tracking
+    if (seqNum == 1)
+    {
+    	Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
+    }
+
+
     seqNum_prev = seqNum;
-    m_cur_seq_num = seqNum;
+
 
     // Transient if this is the first packet received after a start
     if (env_audio.state == LINK_TRANSIENT)
@@ -80,7 +91,7 @@ void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqN
     uint8_t num_inserted = 0;
     for (i = 0; i < audio_length; i += ENCODED_FRAME_LENGTH)
     {
-        QueueInsert(&audio_queue, &audio_buff[i], GOOD_PACKET);
+        QueueInsert(&audio_queue, &audio_buff[i], GOOD_PACKET,seqNum);
         num_inserted++;
     }
 
@@ -92,22 +103,15 @@ void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqN
     if (env_audio.state == LINK_TRANSIENT)
     {
     	APP_Audio_Start();
-    }
-
-
-    // before we start streaming we fill we buffer the audio samples to the threshold
-    uint8_t queue_size = QueueCount(&audio_queue)/  num_inserted;
-    if ((queue_size >= ASHA_L2CC_INITIAL_CREDITS) && (!m_buffer_filling_completed))
-    {
-    	 m_buffer_filling_completed = 1;
-    	 PRINTF("Audio Buffer filling done!\n");
+    	seqNum_prev_stream = seqNum-1;
+    	PRINTF("Save seqNumPrev:%d!\n",seqNum_prev_stream);
 
     }
-    else if ((queue_size == ASHA_L2CC_INITIAL_CREDITS-1)  && (!m_buffer_filling_completed))
+
+    Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
+
+    if (env_audio.state != LINK_DISCONNECTED)
     {
-    	// We have to send one credit in the connection interval before audio rendering starts,
-    	// because a credit packet is always sent in the following connection interval. This avoids
-    	// starvation.
     	ASHA_AddCredits(1);
     }
 }
@@ -138,6 +142,7 @@ void APP_Audio_Start(void)
 
     // Timer interrupts
     NVIC_EnableIRQ(TIMER_IRQn(TIMER_RENDER));
+    NVIC_EnableIRQ(TIMER_IRQn(TIMER_START_STREAM));
 
     // DMA ASRC->Memory config
     Sys_DMA_ChannelConfig(
@@ -166,6 +171,18 @@ void APP_Audio_Start(void)
 
     NVIC_EnableIRQ(DMA4_IRQn);
 
+    Sys_Timers_Stop(1U << TIMER_START_STREAM);
+	if (asha_env.con_int == 8)
+	{
+		 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (10000*ASHA_L2CC_INITIAL_CREDITS - 1) |   TIMER_SLOWCLK_DIV2);
+	}
+	else
+	{
+		 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (20000*ASHA_L2CC_INITIAL_CREDITS - 1) |   TIMER_SLOWCLK_DIV2);
+	}
+
+	Sys_Timers_Start(1U << TIMER_START_STREAM);
+
     env_audio.state = LINK_ESTABLISHED;
 }
 
@@ -176,7 +193,7 @@ void APP_Audio_Disconnect(void)
 
     Reset_Audio_Sync_Param(&env_sync, &env_audio);
 
-    m_buffer_filling_completed = 0;
+    m_start_rendering = 0;
 
     memset(od_out_buffer,0,OD_OUT_BUFFER_SIZE* sizeof(int16_t));
 
@@ -275,14 +292,10 @@ void APP_ResetPrevSeqNumber(void)
  * Outputs       : None
  * Assumptions   : None
  * ------------------------------------------------------------------------- */
-static uint8_t cnt = 0;
 void TIMER_IRQ_FUNC(TIMER_RENDER)(void)
 {
 
-	if (m_cur_seq_num==4)
-	{
-		Sys_GPIO_Set_High(0);
-	}
+
     /* for accuracy start the rendering timer in free-run mode once */
     if (!env_sync.timer_free_run)
     {
@@ -292,30 +305,64 @@ void TIMER_IRQ_FUNC(TIMER_RENDER)(void)
         Sys_Timers_Start(1U << TIMER_RENDER);
     }
 
-    Sys_GPIO_Set_Low(0);
-
     // break here when the buffer is not yet filled completly
-    if (!m_buffer_filling_completed)
+    if (!m_start_rendering)
     {
     	asrc_reconfig(&env_sync);
     	return;
     }
 
     // get the audio samples from the queue
-    env_audio.frame_in = QueueFront(&audio_queue, &env_audio.packet_state);
+    uint8_t seq_num = 0xFF;
+    env_audio.frame_in = QueueFront(&audio_queue, &env_audio.packet_state,&seq_num);
     if (env_audio.frame_in != NULL)
     {
-        memcpy(lpdsp32.incoming, env_audio.frame_in, ENCODED_FRAME_LENGTH * sizeof(uint8_t));
-        QueueFree(&audio_queue);
-        if (!env_sync.timer_free_run)
-        {
 
-        }
-        ASHA_AddCredits(1);
+    	 // check if the sequence number is out of sync => enable PLC
+    	 if ((uint8_t)(seq_num - seqNum_prev_stream-1)!=0)
+    	 {
+
+    		 	 	// TODO: think of what should hapen when we have old packets in queue
+    		 	 	if (seqNum_prev_stream >= seq_num)
+    		 	 	{
+    		 	 		PRINTF("Out of sequence! seqNum = %d.\r\n", seq_num);
+    		 	 	}
+
+    	    		env_audio.packet_state = BAD_PACKET;
+    	    		PRINTF("Packet missing! seqNum = %d.\r\n", seq_num-seqNum_prev_stream);
+    	    		seqNum_prev_stream++;
+    	 }
+    	 else
+    	 {
+
+    		 memcpy(lpdsp32.incoming, env_audio.frame_in, ENCODED_FRAME_LENGTH * sizeof(uint8_t));
+    		 QueueFree(&audio_queue);
+    		 if (!env_sync.timer_free_run)
+    		 {
+
+    		 }
+
+    		 // render tracking
+    		 if (seq_num == 1)
+    		 {
+    			 Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
+    		 }
+
+    		 uint8_t seq_num_tmp = 0;
+    		 env_audio.frame_in = QueueFront(&audio_queue, &env_audio.packet_state,&seq_num_tmp);
+    		 if ((env_audio.frame_in == 0) ||  (seq_num_tmp != seq_num))
+    		 {
+    			 seqNum_prev_stream++;
+    		 }
+
+    	 }
+    	 ASHA_AddCredits(1);
     }
+
     else
     {
         env_audio.packet_state = BAD_PACKET;
+        PRINTF("Audio Buffer underflow. Enable PLC!\r\n");
     }
 
     env_sync.timer_free_run = true;
@@ -352,6 +399,15 @@ void TIMER_IRQ_FUNC(TIMER_RENDER)(void)
     lpdsp32.channels.action &= ~DECODE_RESET;
 
     env_sync.cntr_connection++;
+    Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
+}
+
+
+void TIMER_IRQ_FUNC(TIMER_START_STREAM)(void)
+{
+	Sys_Timers_Stop(1U << TIMER_START_STREAM);
+	m_start_rendering = true;
+	NVIC_DisableIRQ(TIMER_IRQn(TIMER_START_STREAM));
 }
 
 
@@ -453,6 +509,7 @@ void DMA4_IRQHandler(void)
  * ------------------------------------------------------------------------- */
 void AUDIOSINK_PHASE_IRQHandler(void)
 {
+
 
 #if SIMUL
     static uint32_t sim_missed = 0;
@@ -598,7 +655,7 @@ void Reset_Audio_Sync_Param(sync_param_t *sync_param, audio_frame_param_t *audio
     audio_param->state = LINK_DISCONNECTED;
     audio_param->packet_state = BAD_PACKET;
 
-    Sys_Timers_Stop(1U << TIMER_REGUL);
-    Sys_Timer_Set_Control(TIMER_REGUL, TIMER_SHOT_MODE | (200 - 1) |
+    Sys_Timers_Stop(1U << TIMER_START_STREAM);
+    Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_SHOT_MODE | (200 - 1) |
     TIMER_SLOWCLK_DIV2);
 }

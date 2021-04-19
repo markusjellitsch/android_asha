@@ -41,7 +41,7 @@ void QueueInit(struct queue_t *queue)
  * Outputs       : None
  * Assumptions   : None
  * ------------------------------------------------------------------------- */
-void QueueInsert(struct queue_t *queue, const uint8_t *x, Packet_State packet_state)
+void QueueInsert(struct queue_t *queue, const uint8_t *x, Packet_State packet_state,uint8_t seq_num)
 {
     struct Node *temp =
         (struct Node *)malloc(sizeof(struct Node));
@@ -55,6 +55,7 @@ void QueueInsert(struct queue_t *queue, const uint8_t *x, Packet_State packet_st
     memcpy(temp->data, x, ENCODED_FRAME_LENGTH * sizeof(uint8_t));
     temp->packet_state = packet_state;
     temp->next = NULL;
+    temp->seq_num = seq_num;
     if (queue->front == NULL && queue->rear == NULL)
     {
         queue->front = queue->rear = temp;
@@ -99,7 +100,7 @@ void QueueFree(struct queue_t *queue)
  * Outputs       : return: Pointer to the front element
  * Assumptions   : None
  * ------------------------------------------------------------------------- */
-uint8_t * QueueFront(struct queue_t *queue, Packet_State * packet_state)
+uint8_t * QueueFront(struct queue_t *queue, Packet_State * packet_state,uint8_t * seq_num)
 {
     if (queue->front == NULL)
     {
@@ -107,6 +108,7 @@ uint8_t * QueueFront(struct queue_t *queue, Packet_State * packet_state)
     }
 
     *packet_state = queue->front->packet_state;
+    *seq_num = queue->front->seq_num;
     return (queue->front->data);
 }
 
