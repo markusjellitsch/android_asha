@@ -25,6 +25,8 @@
 #include <app_audio.h>
 
 
+extern uint8_t asha_side;
+
 /* Global variable definition */
 struct ASHA_Env_t asha_env;
 
@@ -168,6 +170,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
             {
                 /* Register a LE Protocol/Service Multiplexer for ASHA */
                 GAPM_LepsmRegisterCmd(ASHA_LE_PSM, TASK_APP, 0); //TODO: generalize SEC level param
+                GAPM_LepsmRegisterCmd(ASHA_LE_PSM_SYNC, TASK_APP, 0);
                 PRINTF("\r\n sending GAPM_LEPSM_REG_CMD...");
             }
             else if(p->operation == GAPM_LEPSM_REG &&  p->status == GAP_ERR_NO_ERROR)
@@ -209,10 +212,10 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
         case L2CC_LECB_CONNECT_REQ_IND:
         {
         	// only allow one Audio Stream at a time
-        	if (asha_env.conidx != 0xFF)
-        	{
-        		break;
-        	}
+        	//if (asha_env.conidx != 0xFF)
+        	//{
+        	//	break;
+        	//}
 
         	/* If L2CC connection request has ASHA LE_PSM, accept it */
             const struct l2cc_lecb_connect_req_ind* p = param;
@@ -237,9 +240,45 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
 
                 asha_env.conidx = conidx;
             }
+            else if (p->le_psm == ASHA_LE_PSM_SYNC)
+            {
+            	struct l2cc_lecb_connect_req_ind const *ind = (struct l2cc_lecb_connect_req_ind const *)param;
+
+				struct l2cc_lecb_connect_cfm cfm = {
+					.le_psm = ind->le_psm,
+					.peer_cid = ind->peer_cid,
+					.local_mps = ind->peer_mps,
+					.local_mtu = ind->peer_mtu,
+					.accept = true,
+					.local_cid = 0,
+					.local_credit = 8,
+				};
+
+				L2CC_LecbConnectCfm(conidx, &cfm);
+            }
         }
         break;
 
+        case L2CC_CMP_EVT:
+        {
+        	struct l2cc_cmp_evt * evt = param;
+
+        	if (evt->operation == L2CC_LECB_CONNECT)
+        	{
+        		if (evt->status == 0)
+        		{
+        			PRINTF("Send Sync Info\n");
+        			L2CC_LecbSduSendCmd(conidx,asha_env.peer_cid_sync,5,APP_GetSyncInfo());
+        		}
+        		PRINTF("L2CC_CMP_EVT: op:%d , status %d\n",evt->operation,evt->status);
+        	}
+        	else if ((evt->operation == L2CC_LECB_SDU_SEND) && (evt->status != 0))
+        	{
+        		PRINTF("L2CC_CMP_EVT: op:%d , status %d\n",evt->operation,evt->status);
+        	}
+
+        }
+        break;
         case L2CC_LECB_CONNECT_IND:
         {
             const struct l2cc_lecb_connect_ind* ind = param;
@@ -251,28 +290,45 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
 
                 PRINTF("\r\n ASHA_MsgHandler: L2CC_LECB_CONNECT_IND: peer_cid=%d", ind->peer_cid);
             }
+            else if (ind->le_psm == ASHA_LE_PSM_SYNC)
+            {
+            	asha_env.local_cid_sync = ind->local_cid;
+				asha_env.peer_cid_sync = ind->peer_cid;
+            	PRINTF("\r\n ASHA_MsgHandler: L2CC_LECB_CONNECT_IND: peer_cid=%d", ind->peer_cid);
+            }
         }
         break;
 
         case L2CC_LECB_SDU_RECV_IND:
         {
         	// only allow one audio stream connection at at time
-        	if (conidx != asha_env.conidx)
-            {
-            	break;
-            }
+//        	if (conidx != asha_env.conidx)
+//            {
+//            	break;
+//            }
 
         	const struct l2cc_lecb_sdu_recv_ind* p = param;
             struct asha_audio_received *rcv_p;
 
-            if(p->sdu.cid != asha_env.local_cid)
-                break;
+            if(p->sdu.cid == asha_env.local_cid)
+            {
 
-//            PRINTF("\r\n ASHA_MsgHandler: L2CC_LECB_SDU_RECV_IND status=%d cid=%d credit=%d len=%d data[0]=%d",
-//                    p->status, p->sdu.cid, p->sdu.credit, p->sdu.length, p->sdu.data[0]);
+            	rcv_p = (void*)param+offsetof(struct l2cc_lecb_sdu_recv_ind, sdu.credit);
+            	asha_env.appCallback(ASHA_AUDIO_RCVD, rcv_p);
+            }
+            else
+            {
 
-            rcv_p = (void*)param+offsetof(struct l2cc_lecb_sdu_recv_ind, sdu.credit);
-            asha_env.appCallback(ASHA_AUDIO_RCVD, rcv_p);
+            	uint32_t * remote_sync_info = (uint32_t*)(p->sdu.data);
+            	uint8_t * seqNum = (uint8_t*)(p->sdu.data+4);
+				PRINTF("Received Sync! %d \n",*remote_sync_info);
+				if (asha_side == ASHA_CAPABILITIES_SIDE_LEFT)
+				{
+					GAPC_DisconnectCmd(conidx,CO_ERROR_REMOTE_USER_TERM_CON);
+				}
+
+				APP_AdaptRenderDelay(*remote_sync_info,*seqNum);
+            }
         }
         break;
     }
@@ -311,7 +367,8 @@ uint8_t ASHA_AudioControlPoint_Callback(uint8_t conidx, uint16_t attidx, uint16_
             struct asha_audio_start param = {
                 .codec = asha_env.audioControlPoint.codec,
                 .audiotype = asha_env.audioControlPoint.audioType,
-                .volume = asha_env.audioControlPoint.volume
+                .volume = asha_env.audioControlPoint.volume,
+				.other_state =asha_env.audioControlPoint.otherstate
             };
 
             // start the stream
@@ -335,9 +392,12 @@ uint8_t ASHA_AudioControlPoint_Callback(uint8_t conidx, uint16_t attidx, uint16_
 
         asha_env.audioStatusPoint = 0;
     }
-    else if (opCode == 3)
+    else if (opCode == ASHA_AUDIOCONTROLPOINT_STATUS)
     {
-        PRINTF("\r\nopCode=3 ('Status') received, to be implemented"); // TODO
+
+    	uint8_t param =fromData[1];
+
+    	asha_env.appCallback(ASHA_AUDIO_STATUS, &param);
 
         asha_env.audioStatusPoint = 0;
     }

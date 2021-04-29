@@ -66,9 +66,6 @@ volatile int16_t asrc_sync_buf[2500-451] = {0};
 
 #define DEFAULT_DEVICE_NAME {'R','O','N','D','O','\0'};
 
-
-
-
 const uint8_t D_AES_KEY[16] __attribute__((section(".param_data_table")))={0};
 const uint8_t D_DELAYED_EEPROM_WRITE_TIME __attribute__((section(".param_data_table")))=2;
 const uint8_t D_GAP_DEVICE_NAME_LEN __attribute__((section(".param_data_table")))=1;
@@ -77,11 +74,33 @@ const uint8_t D_GAP_DEVICE_NAME[22] __attribute__((section(".param_data_table"))
 
 uint8_t asha_side = ASHA_CAPABILITIES_SIDE_LEFT;
 
+
+struct gapm_start_connection_cmd startConnectionCmd =
+{
+    .op = {
+        .code = GAPM_CONNECTION_AUTO,
+        .addr_src =GAPM_STATIC_ADDR,
+        .state = 0
+    },
+
+    .scan_interval = 10,
+    .scan_window = 10,
+    .con_intv_min = GAPM_DEFAULT_CON_INTV_MIN,
+    .con_intv_max = GAPM_DEFAULT_CON_INTV_MAX,
+    .con_latency = GAPM_DEFAULT_CON_LATENCY,
+    .superv_to = GAPM_DEFAULT_SUPERV_TO,
+    .ce_len_min = 0x6,
+    .ce_len_max = 0x6,
+    .nb_peers = 1,
+    .peers =  {{APP_BD_ADDRESS,APP_BD_ADDRESS_TYPE},}
+};
+
 //
 //const uint8_t D_AES_KEY[16];
 //const uint8_t D_DELAYED_EEPROM_WRITE_TIME;
 //const uint16_t D_GAP_DEVICE_NAME_LEN;
 //const uint8_t D_GAP_DEVICE_NAME[22];
+
 
 
 /* ----------------------------------------------------------------------------
@@ -118,8 +137,8 @@ static void DISS_Setup(void)
 int main(void)
 {
 
-   /* Configure hardware and initialize BLE stack */
-   ble_init();
+    /* Configure hardware and initialize BLE stack */
+    ble_init();
 
     TRACE_INIT();
 
@@ -133,8 +152,8 @@ int main(void)
     {
     	PRINTF("\r\n===== Initializing ble_android_asha RIGHT ====\n");
     	asha_side = ASHA_CAPABILITIES_SIDE_RIGHT;
-
     	devConfigCmd.addr.addr[5] = 0xD6;
+    	devConfigCmd.role = GAP_ROLE_ALL;
     }
     else
     {
@@ -166,6 +185,8 @@ int main(void)
     MsgHandler_Add(APP_BATT_LEVEL_LOW, APP_BASS_BattLevelLow_Handler);
 
     Sys_DIO_Config(0,DIO_MODE_GPIO_OUT_0);
+
+    NVIC_EnableIRQ(DIO0_IRQn);
 
 
     /* Reset the GAP manager. Trigger GAPM_CMP_EVT / GAPM_RESET when finished. See APP_GAPM_GATTM_Handler */

@@ -240,7 +240,7 @@ extern LPDSP32Context lpdsp32;
                                  DMA_LITTLE_ENDIAN              | \
                                  DMA_PRIORITY_0                 | \
                                  DMA_COMPLETE_INT_DISABLE       | \
-                                 DMA_COUNTER_INT_ENABLE         | \
+                                 DMA_COUNTER_INT_DISABLE         | \
                                  DMA_DEST_WORD_SIZE_32          | \
                                  DMA_SRC_WORD_SIZE_16           | \
                                  DMA_SRC_ADDR_STATIC            | \
@@ -308,6 +308,17 @@ void APP_Audio_Start(void);
 void APP_Audio_Disconnect(void);
 
 void APP_Audio_FlushQueue(void);
+
+bool APP_Start_Binaural_Sync(void);
+
+void APP_CalculateSync(void);
+
+uint8_t *APP_GetSyncInfo(void);
+
+void APP_AdaptRenderDelay(uint32_t remote_sync,uint8_t seqNum);
+
+void APP_StartSyncCapture(void);
+
 
 /* ----------------------------------------------------------------------------
  * Close the 'extern "C"' block

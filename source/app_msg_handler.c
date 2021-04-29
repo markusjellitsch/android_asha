@@ -35,6 +35,8 @@ extern const struct att_db_desc asha_att_db[];
 
 extern audio_frame_param_t env_audio;
 
+
+
 /* ----------------------------------------------------------------------------
  * Function      : void APP_ASHA_CallbackHandler(enum ASHA_Operation_t op, void *param)
  * ----------------------------------------------------------------------------
@@ -69,15 +71,40 @@ void APP_ASHA_CallbackHandler(enum ASHA_Operation_t op, void *param)
             struct asha_audio_start* p = param;
             Volume_Set(p->volume);
             APP_ResetPrevSeqNumber();
-            PRINTF("\r\nAPP_ASHA_CallbackHandler - ASHA_AUDIO_START: codec=%d audiotype=%d volume=%d\r\n",
-                    p->codec, p->audiotype, p->volume);
+            PRINTF("\r\nAPP_ASHA_CallbackHandler - ASHA_AUDIO_START: codec=%d audiotype=%d volume=%d otherstate:%d\r\n",
+                    p->codec, p->audiotype, p->volume,p->other_state);
 
             if( env_audio.state == LINK_DISCONNECTED )
             {
                 /* We don't directly start the rendering IRQs, we'll delay that
                  * to after we received an audio packet */
                 env_audio.state = LINK_TRANSIENT;
+                if (p->other_state)
+                {
+                	asha_env.binaural = true;
+                }
+                else
+                {
+                	asha_env.binaural = false;
+                }
             }
+        }
+        break;
+
+
+        case ASHA_AUDIO_STATUS:
+        {
+        	PRINTF("\r\nAPP_ASHA_CallbackHandler - ASHA_AUDIO_STATUS\r\n");
+        	uint8_t * state = (uint8_t *)param;
+
+        	if (*state ==1)
+        	{
+        		asha_env.binaural = true;
+        	}
+        	else if (*state == 0)
+        	{
+        		asha_env.binaural = false;
+        	}
         }
         break;
 
@@ -93,6 +120,10 @@ void APP_ASHA_CallbackHandler(enum ASHA_Operation_t op, void *param)
 
         	// start audio streaming by inserting audio data to the queue
         	struct asha_audio_received *rcv_p = (struct asha_audio_received *) param;
+        	if (rcv_p->credit > 1)
+        	{
+        		PRINTF("More than 1 credit needed! %d",rcv_p->credit);
+        	}
             APP_Audio_Transfer(rcv_p->data, rcv_p->length - 1, rcv_p->seq_number);
         }
         break;
@@ -144,6 +175,16 @@ void APP_GAPM_GATTM_Handler(ke_msg_id_t const msg_id, void const *param,
                 GAPC_ConnectionCfm(conidx, &cfm); /* Confirm connection without LTK. */
                 PRINTF("\r\nGAPM_CMP_EVT / GAPM_RESOLV_ADDR. conidx=%d Status = NOT FOUND", conidx);
             }
+            else if (p->operation == GAPM_CONNECTION_AUTO)
+            {
+
+            	if (p->status != 0)
+            	{
+            		PRINTF("Couldn't start connection. status code:%d\n",p->status);
+            	}
+
+            }
+
         }
         break;
 
@@ -154,6 +195,7 @@ void APP_GAPM_GATTM_Handler(ke_msg_id_t const msg_id, void const *param,
             if(GAPM_GetProfileAddedCount() == APP_NUM_STD_PRF &&
                GATTM_GetServiceAddedCount() == APP_NUM_CUSTOM_SVC)
             {
+
                 GAPM_StartAdvertiseCmd(&advertiseCmd); /* Start advertising */
 
                 /* Start the LED periodic timer. LED blinks according to the
@@ -198,7 +240,7 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
     {
         case GAPC_CONNECTION_REQ_IND:
         {
-            Sys_GPIO_Set_High(0);
+
             const struct gapc_connection_req_ind* p = param;
             PRINTF("\r\nGAPC_CONNECTION_REQ_IND: con_interval=%d, con_latency = %d, sup_to = %d, clk_accuracy = %d",
                     p->con_interval,
@@ -225,19 +267,40 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
                 GAPC_ConnectionCfm(conidx, &cfm); /* Send connection confirmation */
             }
 
-            /* If not yet connected to all peers, keep advertising */
-            if((GAPC_GetConnectionCount() < APP_NB_PEERS))
+            if (conidx == 0) asha_env.con_int = p->con_interval;
+            else if (conidx ==1)
             {
-                GAPM_StartAdvertiseCmd(&advertiseCmd);
+            	APP_StartSyncCapture();
+            	Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
+            	PRINTF("Binaural Link Connected\n");
+            	Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
+
+            if (asha_side <= ASHA_CAPABILITIES_SIDE_RIGHT){
+            PRINTF("Start l2CAP Link\n");
+            struct l2cc_lecb_connect_cmd cmd;
+
+			cmd.le_psm = ASHA_LE_PSM_SYNC;
+			cmd.pkt_id = 0;
+			cmd.local_mtu = 100;
+			cmd.local_mps = 100;
+			cmd.local_cid = 0;
+			cmd.local_credit = 0xFFFF;
+			cmd.operation = L2CC_LECB_CONNECT;
+
+            L2CC_LecbConnectCmd(conidx, &cmd);
             }
 
-            if (conidx == 0) asha_env.con_int = p->con_interval;
+            }
         }
         break;
 
         case GAPC_DISCONNECT_IND:
         {
-            GAPM_StartAdvertiseCmd(&advertiseCmd);
+        	if (conidx == 0)
+        	{
+        		GAPM_StartAdvertiseCmd(&advertiseCmd);
+        		GAPC_DisconnectAll(CO_ERROR_REMOTE_USER_TERM_CON);
+        	}
             PRINTF("\r\nGAPC_DISCONNECT_IND: reason = %d", ((struct gapc_disconnect_ind*)param)->reason);
         }
         break;

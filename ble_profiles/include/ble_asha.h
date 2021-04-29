@@ -67,9 +67,11 @@ extern "C"
 #define ASHA_CODEC_ID_G722_16KHZ             (1 << 1)
 #define ASHA_CODEC_ID_G722_24KHZ             (1 << 2)
 #define ASHA_LE_PSM                          0xA8
+#define ASHA_LE_PSM_SYNC					 0xA9
 #define ASHA_AUDIOCONTROLPOINT_START         1
 #define ASHA_AUDIOCONTROLPOINT_STOP          2
-#define ASHA_L2CC_INITIAL_CREDITS            4
+#define ASHA_AUDIOCONTROLPOINT_STATUS        3
+#define ASHA_L2CC_INITIAL_CREDITS            8
 
 /* ----------------------------------------------------------------------------
  * Global variables and types
@@ -157,6 +159,8 @@ enum ASHA_Operation_t
     ASHA_AUDIO_STOP,
     /** Fired when an audio packet is received */
     ASHA_AUDIO_RCVD,
+
+	ASHA_AUDIO_STATUS
 };
 
 /** ASHA environment structure
@@ -182,6 +186,9 @@ struct ASHA_Env_t
     uint16_t peer_cid;
     uint16_t local_cid;
 
+    uint16_t peer_cid_sync;
+    uint16_t local_cid_sync;
+
     /* Application callback */
     void (*appCallback)(enum ASHA_Operation_t op, void *param);
 
@@ -189,6 +196,8 @@ struct ASHA_Env_t
     uint8_t conidx;
 
     uint8_t con_int;
+
+    bool binaural;
 };
 
 
@@ -211,6 +220,8 @@ struct asha_audio_start
     uint8_t audiotype;
     /** A value from -128 to 0 representing the audio playback volume */
     int8_t volume;
+
+    uint8_t other_state;
 };
 
 /** Used as an argument to the user volume change callback */

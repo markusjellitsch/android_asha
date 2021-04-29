@@ -68,7 +68,7 @@ enum appm_msg
  * the bluetooth address is loaded from FLASH NVR3. Otherwise, this address is used. */
 #define APP_BD_ADDRESS_TYPE              GAPM_CFG_ADDR_PRIVATE /* or GAPM_CFG_ADDR_PRIVATE */
 #define APP_BD_ADDRESS                   { 0x94, 0x11, 0x22, 0xff, 0xbb, 0xD5 }
-#define APP_NB_PEERS                     1 /* Always 1 */
+#define APP_NB_PEERS                     2 /* Always 1 */
 
 /* The number of standard profiles and custom services added in this application */
 #define APP_NUM_STD_PRF                 2

@@ -23,7 +23,40 @@
 
 #include <stdlib.h>
 
-static MsgHandler_t *msgHandlerHead = NULL;
+
+
+static MsgHandler_t msgHandlers[64];
+static uint64_t used_handlers = 0;
+
+static bool MsgHandler_field_used(uint8_t index){
+	if(index>64){
+		return true;
+	}
+	if((used_handlers & (1U << index)) > 0){
+		return true;
+	}
+	return false;
+}
+
+static void MsgHandler_set_field_used(uint8_t index){
+	used_handlers = used_handlers | (1U<< index);
+}
+
+static void MsgHandler_set_field_unused(uint8_t index){
+	used_handlers = used_handlers & ~(1U<< index);
+}
+
+static MsgHandler_t* MsgHandler_get_next_free_field(){
+	for (int var = 0; var < 64; ++var) {
+		if(!MsgHandler_field_used(var)){
+			MsgHandler_set_field_used(var);
+			return &msgHandlers[var];
+		}
+	}
+	return NULL;
+}
+
+
 
 /* ----------------------------------------------------------------------------
  * Function      : bool MsgHandler_Add(ke_msg_id_t const msg_id,
@@ -42,32 +75,20 @@ bool MsgHandler_Add(ke_msg_id_t const msg_id,
                     void (*callback)(ke_msg_id_t const msg_id, void const *param,
                     ke_task_id_t const dest_id, ke_task_id_t const src_id))
 {
-    MsgHandler_t *newElem = malloc(sizeof(MsgHandler_t));
+    MsgHandler_Remove(msg_id, callback); /* Avoid handler duplication, in case it already exists */
+
+    MsgHandler_t *newElem = MsgHandler_get_next_free_field();
 
     if(!newElem) /* Malloc error */
     {
+#if MEDEL_DEBUG
+    	while(1);
+#endif
         return false;
     }
 
     newElem->msg_id = msg_id;
     newElem->callback = callback;
-    newElem->next = NULL;
-
-    if(!msgHandlerHead) /* If list is empty, newElem will be the new head */
-    {
-        msgHandlerHead = newElem;
-    }
-    else
-    {
-        MsgHandler_t *tmp = msgHandlerHead;
-        MsgHandler_Remove(msg_id, callback); /* Avoid handler duplication, in case it already exists */
-
-        while(tmp->next) /* Go to the end of the list */
-        {
-            tmp = tmp->next;
-        }
-        tmp->next = newElem; /* Insert newElem at the end of the list */
-    }
 
     return true;
 }
@@ -89,39 +110,13 @@ bool MsgHandler_Remove(ke_msg_id_t const msg_id,
                        void (*callback)(ke_msg_id_t const msg_id, void const *param,
                                         ke_task_id_t const dest_id, ke_task_id_t const src_id))
 {
-    MsgHandler_t *tmp, *prev;
-    bool removed = false;
-
-    if(!msgHandlerHead)
-    {
-        return false;
-    }
-
-    tmp = msgHandlerHead;
-
-    /* If the element to be removed is the head of the list */
-    if((msgHandlerHead->msg_id == msg_id) && (msgHandlerHead->callback == callback))
-    {
-        msgHandlerHead = msgHandlerHead->next;
-        free(tmp);
-        removed = true;
-    }
-    else /* Search the remainder of the list */
-    {
-        do {
-            prev = tmp; /* Keep track of previous element */
-            tmp = tmp->next;
-        } while(tmp && ((tmp->msg_id != msg_id) || (tmp->callback != callback)));
-
-        if(tmp) /* if element found */
-        {
-            prev->next = tmp->next; /* Remove element from list */
-            free(tmp);
-            removed = true;
-        }
-    }
-
-    return removed;
+	for (int var = 0; var < 64; ++var) {
+		if(MsgHandler_field_used(var) && msgHandlers[var].msg_id == msg_id && msgHandlers[var].callback == callback){
+			MsgHandler_set_field_unused(var);
+			return true;
+		}
+	}
+    return false;
 }
 
 /* ----------------------------------------------------------------------------
@@ -147,7 +142,6 @@ bool MsgHandler_Remove(ke_msg_id_t const msg_id,
 int MsgHandler_Notify(ke_msg_id_t const msg_id, void *param,
                       ke_task_id_t const dest_id, ke_task_id_t const src_id)
 {
-    MsgHandler_t *tmp = msgHandlerHead;
     uint8_t task_id = KE_IDX_GET(msg_id);
 
     /* First notify abstraction layer handlers */
@@ -172,16 +166,14 @@ int MsgHandler_Notify(ke_msg_id_t const msg_id, void *param,
 #endif /* RTE_BLE_L2CC_ENABLE */
     }
 
+
     /* Notify subscribed application/profile handlers */
-    while(tmp)
-    {
+	for (int var = 0; var < 64; ++var) {
         /* If message ID matches or the handler should be called for all
          * messages of this task type */
-        if((tmp->msg_id == msg_id) || (tmp->msg_id == task_id))
-        {
-            tmp->callback(msg_id, param, dest_id, src_id);
-        }
-        tmp = tmp->next;
-    }
+		if(MsgHandler_field_used(var) && (msgHandlers[var].msg_id == msg_id || msgHandlers[var].msg_id == task_id)){
+			msgHandlers[var].callback(msg_id, param, dest_id, src_id);
+		}
+	}
     return KE_MSG_CONSUMED;
 }

@@ -32,9 +32,11 @@ extern "C"
 #define AUDIO_OD_GAIN                   0x800
 #define DMIC_CLK_DIO                    15
 #define DMIC_DATA_DIO                   14
+
+// @16.129 Khz
 #define AUDIO_CONFIG                    (OD_AUDIOCLK                | \
                                          DMIC_AUDIOCLK              | \
-                                         DECIMATE_BY(200)           | \
+                                         DECIMATE_BY(248)           | \
                                          OD_UNDERRUN_PROTECT_ENABLE | \
                                          OD_DATA_LSB_ALIGNED        | \
                                          DMIC0_DATA_MSB_ALIGNED     | \

@@ -202,7 +202,7 @@ void L2CC_MsgHandler(ke_msg_id_t const msg_id, void const *param,
                     break;
                 }
             }
-            l2c_env.connectionCount--;
+            if (l2c_env.connectionCount > 0)l2c_env.connectionCount--;
             PRINTF("\r\n L2CC_LECB_DISCONNECT_IND: reason=0x%02x connectionCount=%d le_psm=%d local_cid=%d peer_cid=%d",
                     ind->reason, l2c_env.connectionCount, ind->le_psm, ind->local_cid, ind->peer_cid);
         }
