@@ -51,7 +51,6 @@ static uint8_t m_sync_buffer[5] = {0};
 
 static uint32_t m_local_sync = 0;
 
-
 static uint16_t m_samples_to_correct = 0;
 
 extern void BLE_COEX_RX_TX_IRQHandler(void);
@@ -69,7 +68,6 @@ void BLE_COEX_RX_TX_IRQHandler(void)
 	static uint8_t state = 0;
 	volatile uint32_t bbif_status =  *((uint32_t *)0x40001404);
 	volatile uint32_t link_label = (bbif_status & BBIF_STATUS_LINK_LABEL_Mask) >> BBIF_STATUS_LINK_LABEL_Pos;
-	volatile uint32_t link_format = (bbif_status & BBIF_STATUS_LINK_FORMAT_Mask) >> BBIF_STATUS_LINK_FORMAT_Pos;
 
 	if (link_label == 1)
 	{
@@ -80,7 +78,7 @@ void BLE_COEX_RX_TX_IRQHandler(void)
 		else
 		{
 			Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
-			APP_CalculateSync();
+			APP_ComputeSyncInfo();
 			Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
 			NVIC_DisableIRQ(BLE_COEX_RX_TX_IRQn);
 			state = 0;
@@ -88,8 +86,7 @@ void BLE_COEX_RX_TX_IRQHandler(void)
 	}
 }
 
-
-bool APP_Start_Binaural_Sync(void)
+bool APP_EstablishBinauralSyncLink(void)
 {
 	if (!asha_env.binaural || !m_start_rendering)
 	{
@@ -106,14 +103,15 @@ bool APP_Start_Binaural_Sync(void)
 	return true;
 }
 
-void APP_CalculateSync(void)
+
+void APP_ComputeSyncInfo(void)
 {
 	__disable_irq();
 	// we have to timestamp
 	uint8_t seqNum100 = 0;
 	if (seqNum_prev_stream > 100)
 	{
-		seqNum100 = 255-seqNum_prev_stream + 100 -1;
+		seqNum100 = 0xFF-seqNum_prev_stream + 100 -1;
 	}
 	else
 	{
@@ -145,8 +143,6 @@ void APP_CalculateSync(void)
 
 	m_local_sync =  time_to_packet100;
 
-
-
 	m_sync_buffer[0] =(uint8_t)(time_to_packet100 & 0xFF);
 	time_to_packet100 = time_to_packet100 >> 8;
 	m_sync_buffer[1] =(uint8_t)(time_to_packet100 & 0xFF);
@@ -159,7 +155,7 @@ void APP_CalculateSync(void)
 }
 
 
-void APP_StartSyncCapture()
+void APP_StartTxSyncCapture()
 {
     NVIC_EnableIRQ(BLE_COEX_RX_TX_IRQn);
     NVIC_SetPriority(BLE_COEX_RX_TX_IRQn,0);
@@ -167,7 +163,8 @@ void APP_StartSyncCapture()
 	*((uint32_t *)BBIF_COEX_INT_CFG_BASE) = (BLE_TX_EVENT_TRANSITION);
 }
 
-void APP_AdaptRenderDelay(uint32_t remote_sync,uint8_t seqNum)
+
+void APP_CorrectLeftRightOffset(uint32_t remote_sync,uint8_t seqNum)
 {
 
 	PRINTF("Local Sync %d seqNum: %d\n",m_local_sync,seqNum);
@@ -195,6 +192,7 @@ void APP_AdaptRenderDelay(uint32_t remote_sync,uint8_t seqNum)
 	NVIC_SetPriority(DMA0_IRQn,0);
 	NVIC_EnableIRQ(DMA0_IRQn);
 }
+
 
 uint8_t *APP_GetSyncInfo(void)
 {
@@ -259,10 +257,9 @@ void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqN
 
     }
 
-
    // Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
 
-	APP_Start_Binaural_Sync();
+	APP_EstablishBinauralSyncLink();
 }
 
 void APP_Audio_Start(void)
@@ -726,6 +723,7 @@ void DSP0_IRQHandler(void)
 
              PRINTF("buf_asrc: %d buffer_out: %d level:%d asrc:%d\n",buffer_in,buffer_out,buffer_level,asrc);
 #endif
+
    env_audio.frame_dec = (int16_t *) lpdsp32.outgoing;
 
     if (env_sync.flag_ascc_phase)
@@ -751,70 +749,6 @@ void DMA3_IRQHandler()
 	while (ASRC_CTRL->ASRC_PROC_STATUS_ALIAS != ASRC_IDLE_BITBAND);
 	Sys_ASRC_StatusConfig(ASRC_DISABLE);
 	Sys_DMA_ChannelDisable(ASRC_IN_IDX);
-}
-
-/// DMA4 IRQHandler
-void DMA4_IRQHandler()
-{
-#define RX_DMA_ASRC_OUT_MEM_CORR     (DMA_SRC_ASRC                  | \
-                                 	 DMA_TRANSFER_P_TO_M            | \
-									 DMA_LITTLE_ENDIAN              | \
-									 DMA_PRIORITY_0                 | \
-									 DMA_COMPLETE_INT_ENABLE       	| \
-									 DMA_COUNTER_INT_DISABLE        | \
-									 DMA_DEST_WORD_SIZE_32          | \
-									 DMA_SRC_WORD_SIZE_16           | \
-									 DMA_SRC_ADDR_STATIC            | \
-									 DMA_DEST_ADDR_INC	            | \
-									 DMA_ADDR_CIRC                   | \
-									 DMA_ENABLE)
-
-	static uint8_t cnt = 0;
-
-	if (cnt++ < 5)
-	{
-		return;
-	}
-
-
-	if (m_samples_to_correct >0)
-	{
-		Sys_DMA_ClearChannelStatus(ASRC_OUT_IDX);
-
-		volatile uint32_t word_cnt = DMA->WORD_CNT[ASRC_OUT_IDX];
-
-	    // DMA ASRC->Memory config
-	    Sys_DMA_ChannelConfig(
-		   ASRC_OUT_IDX,
-		   RX_DMA_ASRC_OUT_MEM_CORR,
-		   640-m_samples_to_correct,
-		   0,
-		   (uint32_t)&ASRC->OUT,
-		   (uint32_t)(od_out_buffer+m_samples_to_correct));
-
-
-
-	    m_samples_to_correct = 0;
-	}
-	else
-	{
-		Sys_DMA_ClearChannelStatus(ASRC_OUT_IDX);
-
-	    // DMA ASRC->Memory config
-	    Sys_DMA_ChannelConfig(
-		   ASRC_OUT_IDX,
-		   RX_DMA_ASRC_OUT_MEM,
-		   640,
-		   0,
-		   (uint32_t)&ASRC->OUT,
-		   (uint32_t)od_out_buffer);
-
-
-		Sys_DMA_ChannelEnable(ASRC_OUT_IDX);
-		NVIC_DisableIRQ(DMA4_IRQn);
-
-		cnt = 0;
-	}
 }
 
 
