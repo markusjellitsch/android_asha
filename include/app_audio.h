@@ -309,15 +309,15 @@ void APP_Audio_Disconnect(void);
 
 void APP_Audio_FlushQueue(void);
 
-bool APP_Start_Binaural_Sync(void);
+bool APP_EstablishBinauralSyncLink(void);
 
-void APP_CalculateSync(void);
+void APP_ComputeSyncInfo(void);
 
 uint8_t *APP_GetSyncInfo(void);
 
-void APP_AdaptRenderDelay(uint32_t remote_sync,uint8_t seqNum);
+void APP_CorrectLeftRightOffset(uint32_t remote_sync,uint8_t seqNum);
 
-void APP_StartSyncCapture(void);
+void APP_StartTxSyncCapture(void);
 
 
 /* ----------------------------------------------------------------------------

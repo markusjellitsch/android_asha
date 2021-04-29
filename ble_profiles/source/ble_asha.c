@@ -327,7 +327,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
 					GAPC_DisconnectCmd(conidx,CO_ERROR_REMOTE_USER_TERM_CON);
 				}
 
-				APP_AdaptRenderDelay(*remote_sync_info,*seqNum);
+				APP_CorrectLeftRightOffset(*remote_sync_info,*seqNum);
             }
         }
         break;

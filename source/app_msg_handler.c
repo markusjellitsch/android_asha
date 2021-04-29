@@ -270,7 +270,7 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
             if (conidx == 0) asha_env.con_int = p->con_interval;
             else if (conidx ==1)
             {
-            	APP_StartSyncCapture();
+            	APP_StartTxSyncCapture();
             	Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
             	PRINTF("Binaural Link Connected\n");
             	Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
