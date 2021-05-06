@@ -27,6 +27,12 @@
 
 extern struct ASHA_Env_t asha_env;
 
+#define RFREG_BASE                      0x40010000
+#define IRQ_CONF                        0x0D
+#define IRQ_STATUS                      0xD8
+#define RF_REG_WRITE(addr, value)       (*(volatile uint8_t *)(RFREG_BASE + addr)) = (value)
+#define RF_REG_READ(addr)               (*(volatile uint8_t *)(RFREG_BASE + addr))
+
 /* Configuration pre-set in app_config.c */
 extern struct gapm_set_dev_config_cmd  devConfigCmd;
 extern struct gapm_start_advertise_cmd advertiseCmd;
@@ -87,6 +93,13 @@ void APP_ASHA_CallbackHandler(enum ASHA_Operation_t op, void *param)
                 {
                 	asha_env.binaural = false;
                 }
+
+                SYSCTRL_RF_ACCESS_CFG->RF_IRQ_ACCESS_ALIAS = RF_IRQ_ACCESS_ENABLE_BITBAND;
+                *((uint32_t *)BB_COEXIFCNTL0_BASE) = 0x1;
+            	Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
+            	RF_REG_WRITE(IRQ_CONF, 0x2);
+                NVIC_EnableIRQ(RF_RXSTOP_IRQn);
+                NVIC_SetPriority(RF_RXSTOP_IRQn,0);
             }
         }
         break;

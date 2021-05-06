@@ -85,8 +85,8 @@ struct gapm_start_connection_cmd startConnectionCmd =
 
     .scan_interval = 10,
     .scan_window = 10,
-    .con_intv_min = GAPM_DEFAULT_CON_INTV_MIN,
-    .con_intv_max = GAPM_DEFAULT_CON_INTV_MAX,
+    .con_intv_min = GAPM_DEFAULT_CON_INTV_MIN+1,
+    .con_intv_max = GAPM_DEFAULT_CON_INTV_MAX+1,
     .con_latency = GAPM_DEFAULT_CON_LATENCY,
     .superv_to = GAPM_DEFAULT_SUPERV_TO,
     .ce_len_min = 0x6,
@@ -185,6 +185,8 @@ int main(void)
     MsgHandler_Add(APP_BATT_LEVEL_LOW, APP_BASS_BattLevelLow_Handler);
 
     Sys_DIO_Config(0,DIO_MODE_GPIO_OUT_0);
+
+
 
     NVIC_EnableIRQ(DIO0_IRQn);
 

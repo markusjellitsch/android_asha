@@ -28,11 +28,14 @@ extern uint8_t asha_side;
 extern struct gapm_start_connection_cmd startConnectionCmd;
 extern struct gapm_start_advertise_cmd advertiseCmd;
 
+#define RFREG_BASE                      0x40010000
+#define IRQ_CONF                        0x0D
+#define IRQ_STATUS                      0xD8
+#define RF_REG_WRITE(addr, value)       (*(volatile uint8_t *)(RFREG_BASE + addr)) = (value)
+#define RF_REG_READ(addr)               (*(volatile uint8_t *)(RFREG_BASE + addr))
+
 /// Global variables
-uint32_t primEvtCnt = 0, secEvtCnt = 0, invalidRxCnt = 0;
-uint8_t sentValue = 0;
-uint32_t cntr = 0;
-uint32_t cntr_coded = 0;
+
 int8_t volumeShift = 0;
 uint8_t seqNum_prev;
 uint8_t seqNum_prev_stream;
@@ -45,7 +48,9 @@ struct queue_t audio_queue;
 /* Enable / disable PLC feature */
 bool plc_enable = true;
 
-static bool m_start_rendering = 0;
+
+static asha_sync_info_list m_sync_buffer_big = {0};
+static uint8_t m_sync_buffer_idx = 0;
 
 static uint8_t m_sync_buffer[5] = {0};
 
@@ -53,7 +58,10 @@ static uint32_t m_local_sync = 0;
 
 static uint16_t m_samples_to_correct = 0;
 
+static audio_state_t m_audio_state = AUDIO_IDLE;
+
 extern void BLE_COEX_RX_TX_IRQHandler(void);
+
 
 typedef enum
 {
@@ -61,6 +69,75 @@ typedef enum
 	SECOND_FRAME
 }state_t;
 static state_t state = FIRST_FRAME;
+
+
+
+void RF_RXSTOP_IRQHandler(void)
+{
+
+	static uint8_t state = 0;
+	volatile uint32_t bbif_status =  *((uint32_t *)0x40001404);
+	volatile uint32_t link_label = (bbif_status & BBIF_STATUS_LINK_LABEL_Mask) >> BBIF_STATUS_LINK_LABEL_Pos;
+	uint32_t status = RF_REG_READ(IRQ_STATUS);
+
+	if (m_audio_state == AUDIO_IDLE)
+	{
+			Sys_Timers_Stop(1U << TIMER_START_STREAM);
+			if (asha_env.con_int == 8)
+			{
+				 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (10000*(ASHA_L2CC_INITIAL_CREDITS-2) - 1) |   TIMER_SLOWCLK_DIV2);
+			}
+			else
+			{
+				 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (20000*(ASHA_L2CC_INITIAL_CREDITS-5) - 1) |   TIMER_SLOWCLK_DIV2);
+			}
+
+			Sys_Timers_Start(1U << TIMER_START_STREAM);
+	}
+	else if (link_label == 1)
+	{
+		if (state < 3)
+		{
+			Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
+			APP_ComputeSyncInfo();
+			Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
+			state++;
+		}
+		else
+		{
+			m_sync_buffer_idx = 0;
+			state = 0;
+			NVIC_DisableIRQ(RF_RXSTOP_IRQn);
+			RF_REG_WRITE(IRQ_CONF, 0x0);
+		}
+	}
+}
+
+void RF_TX_IRQHandler(void)
+{
+	static uint8_t state = 0;
+	volatile uint32_t bbif_status =  *((uint32_t *)0x40001404);
+	volatile uint32_t link_label = (bbif_status & BBIF_STATUS_LINK_LABEL_Mask) >> BBIF_STATUS_LINK_LABEL_Pos;
+	uint32_t status = RF_REG_READ(IRQ_STATUS);
+
+	if (link_label == 1)
+	{
+		if (state <3)
+		{
+			Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
+			APP_ComputeSyncInfo();
+			Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
+			state++;
+		}
+		else
+		{
+			m_sync_buffer_idx = 0;
+			state = 0;
+	    	NVIC_DisableIRQ(RF_TX_IRQn);
+	    	RF_REG_WRITE(IRQ_CONF, 0x0);
+		}
+	}
+}
 
 
 void BLE_COEX_RX_TX_IRQHandler(void)
@@ -71,16 +148,16 @@ void BLE_COEX_RX_TX_IRQHandler(void)
 
 	if (link_label == 1)
 	{
-		if (state == 0)
+		if (state == 5)
 		{
-			state = 1;
+			state++;
 		}
 		else
 		{
 			Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
 			APP_ComputeSyncInfo();
 			Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
-			NVIC_DisableIRQ(BLE_COEX_RX_TX_IRQn);
+			//NVIC_DisableIRQ(BLE_COEX_RX_TX_IRQn);
 			state = 0;
 		}
 	}
@@ -88,7 +165,7 @@ void BLE_COEX_RX_TX_IRQHandler(void)
 
 bool APP_EstablishBinauralSyncLink(void)
 {
-	if (!asha_env.binaural || !m_start_rendering)
+	if (!asha_env.binaural || (m_audio_state != AUDIO_PLAY))
 	{
 		return false;
 	}
@@ -102,6 +179,8 @@ bool APP_EstablishBinauralSyncLink(void)
 	asha_env.binaural = false;
 	return true;
 }
+
+#ifdef USE_RENDER_TIMER
 
 
 void APP_ComputeSyncInfo(void)
@@ -122,8 +201,70 @@ void APP_ComputeSyncInfo(void)
 		seqNum100 -= 1;
 	}
 
+	uint32_t timer_val = TIMER->VAL[TIMER_RENDER];
+	uint32_t tmp = 0;
+
+	if (state == FIRST_FRAME)
+	{
+		volatile uint32_t cnt = (TIMER->CFG[TIMER_RENDER] & 0xFFFFFF);
+		tmp =  cnt- TIMER->VAL[TIMER_RENDER];
+	}
+	else
+	{
+		tmp = 20000 - TIMER->VAL[TIMER_RENDER];
+	}
+
+
+
+	uint32_t time_to_next_packet =  tmp;
+	uint32_t time_to_packet100 = time_to_next_packet + (seqNum100 * 20000);
+
+	if (asha_side == ASHA_CAPABILITIES_SIDE_LEFT)
+	{
+		time_to_packet100 += 52;
+	}
+
+	m_local_sync =  time_to_packet100;
+
+	asha_sync_info_t info;
+	info.t_play100[0] =(uint8_t)(time_to_packet100 & 0xFF);
+	time_to_packet100 = time_to_packet100 >> 8;
+	info.t_play100[1] =(uint8_t)(time_to_packet100 & 0xFF);
+	time_to_packet100 = time_to_packet100 >> 8;
+	info.t_play100[2] =(uint8_t)(time_to_packet100 & 0xFF);
+	time_to_packet100 = time_to_packet100 >> 8;
+	info.t_play100[3] =(uint8_t)(time_to_packet100 & 0xFF);
+	info.t_play100[4] = seqNum_prev_stream;
+
+	m_sync_buffer_big.list[m_sync_buffer_idx++] = info;
+	__enable_irq();
+}
+
+#else
+
+void APP_ComputeSyncInfo(void)
+{
+	__disable_irq();
+
+	uint16_t dma_cnt = DMA->WORD_CNT[OD_IN_IDX] & 0xFFFF;
+	// we have to timestamp
+	uint8_t seqNum100 = 0;
+	if (seqNum_prev_stream > 100)
+	{
+		seqNum100 = 0xFF-seqNum_prev_stream + 100 -1;
+	}
+	else
+	{
+		seqNum100 = 100 - seqNum_prev_stream - 1;
+	}
+	if (state == SECOND_FRAME)
+	{
+		seqNum100 -= 1;
+	}
+
 	uint32_t sink_cnt = Sys_Audiosink_Counter() % 322;
 	uint32_t phase_cnt = Sys_Audiosink_PhaseCounter() / 16;
+	uint32_t period_cnt = Sys_Audiosink_PeriodCounter() % env_sync.audio_sink_period_cnt;
 
 	int tmp = 0;
 	if (sink_cnt < 133)
@@ -133,70 +274,168 @@ void APP_ComputeSyncInfo(void)
 	else tmp = sink_cnt - 133;
 
 
-	uint32_t time_to_next_packet =  20000 - (tmp * 1000000 /16129) - phase_cnt;
+	uint32_t time_to_next_packet =  20000 - (tmp * 1000000 /16129) - phase_cnt - period_cnt/16;
 	uint32_t time_to_packet100 = time_to_next_packet + (seqNum100 * 20000);
 
 	if (asha_side == ASHA_CAPABILITIES_SIDE_LEFT)
 	{
-		time_to_packet100 += 370;
+		time_to_packet100 += 52;
 	}
 
 	m_local_sync =  time_to_packet100;
 
-	m_sync_buffer[0] =(uint8_t)(time_to_packet100 & 0xFF);
+	asha_sync_info_t info;
+	info.t_play100[0] =(uint8_t)(time_to_packet100 & 0xFF);
 	time_to_packet100 = time_to_packet100 >> 8;
-	m_sync_buffer[1] =(uint8_t)(time_to_packet100 & 0xFF);
+	info.t_play100[1] =(uint8_t)(time_to_packet100 & 0xFF);
 	time_to_packet100 = time_to_packet100 >> 8;
-	m_sync_buffer[2] =(uint8_t)(time_to_packet100 & 0xFF);
+	info.t_play100[2] =(uint8_t)(time_to_packet100 & 0xFF);
 	time_to_packet100 = time_to_packet100 >> 8;
-	m_sync_buffer[3] =(uint8_t)(time_to_packet100 & 0xFF);
-	m_sync_buffer[4] = seqNum_prev_stream;
+	info.t_play100[3] =(uint8_t)(time_to_packet100 & 0xFF);
+	info.t_play100[4] = seqNum_prev_stream;
+
+	info.od_cnt[0] = (uint8_t)(dma_cnt & 0xFF);
+	dma_cnt = dma_cnt >> 8;
+	info.od_cnt[1] = (uint8_t)(dma_cnt & 0xFF);
+
+	m_sync_buffer_big.list[m_sync_buffer_idx++] = info;
 	__enable_irq();
 }
 
+#endif
 
+#ifdef USE_BLE_COEX_SYNC
 void APP_StartTxSyncCapture()
 {
-    NVIC_EnableIRQ(BLE_COEX_RX_TX_IRQn);
-    NVIC_SetPriority(BLE_COEX_RX_TX_IRQn,0);
-    while(BBIF_COEX_STATUS->BLE_IN_PROCESS_ALIAS || BBIF_COEX_STATUS->BLE_RX_ALIAS || BBIF_COEX_STATUS->BLE_TX_ALIAS);
-	*((uint32_t *)BBIF_COEX_INT_CFG_BASE) = (BLE_TX_EVENT_TRANSITION);
+
+	while(BBIF_COEX_STATUS->BLE_IN_PROCESS_ALIAS || BBIF_COEX_STATUS->BLE_RX_ALIAS || BBIF_COEX_STATUS->BLE_TX_ALIAS);
+
+	SYSCTRL_RF_ACCESS_CFG->RF_IRQ_ACCESS_ALIAS = RF_IRQ_ACCESS_ENABLE_BITBAND;
+
+	NVIC_EnableIRQ(BLE_COEX_RX_TX_IRQn);
+	NVIC_SetPriority(BLE_COEX_RX_TX_IRQn,0);
+	if (asha_side ==ASHA_CAPABILITIES_SIDE_RIGHT){
+		*((uint32_t *)BBIF_COEX_INT_CFG_BASE) = (BLE_TX_EVENT_RISING_EDGE);
+	}
+	else
+	{
+		*((uint32_t *)BBIF_COEX_INT_CFG_BASE) = (BLE_RX_EVENT_RISING_EDGE);
+	}
 }
 
-
-void APP_CorrectLeftRightOffset(uint32_t remote_sync,uint8_t seqNum)
+#else
+void APP_StartTxSyncCapture()
 {
 
-	PRINTF("Local Sync %d seqNum: %d\n",m_local_sync,seqNum);
+    while(BBIF_COEX_STATUS->BLE_IN_PROCESS_ALIAS || BBIF_COEX_STATUS->BLE_RX_ALIAS || BBIF_COEX_STATUS->BLE_TX_ALIAS);
 
-	if (m_local_sync > remote_sync)
+
+    SYSCTRL_RF_ACCESS_CFG->RF_IRQ_ACCESS_ALIAS = RF_IRQ_ACCESS_ENABLE_BITBAND;
+
+    *((uint32_t *)BB_COEXIFCNTL0_BASE) = 0x1;
+    BB_COEXIFCNTL2->RX_ANT_DELAY_BYTE = 0xf;
+    BB_COEXIFCNTL2->TX_ANT_DELAY_BYTE = 0xf;
+
+    if (asha_side ==ASHA_CAPABILITIES_SIDE_RIGHT){
+        RF_REG_WRITE(IRQ_CONF, 0x1);
+        NVIC_EnableIRQ(RF_TX_IRQn);
+        NVIC_SetPriority(RF_TX_IRQn,0);
+        BBIF_COEX_CTRL->RX_ALIAS = 1;
+        BBIF_COEX_CTRL->TX_ALIAS = 0;
+    }
+    else
+    {
+    	RF_REG_WRITE(IRQ_CONF, 0x2);
+        NVIC_EnableIRQ(RF_RXSTOP_IRQn);
+        NVIC_SetPriority(RF_RXSTOP_IRQn,0);
+        BBIF_COEX_CTRL->RX_ALIAS = 0;
+        BBIF_COEX_CTRL->TX_ALIAS = 1;
+    }
+}
+
+#endif
+
+
+bool APP_CorrectLeftRightOffset(asha_sync_info_list list,uint8_t numEntries)
+{
+
+	PRINTF("Received Sync!\n");
+
+	uint32_t time_dif_list[3] = {0};
+	uint8_t num_behind = 0;
+	uint32_t time_dif = 0xFFFFFF;
+	uint8_t time_dif_index = 0;
+
+	for (uint8_t i = 0; i < numEntries;i++)
 	{
-		PRINTF("The other Peripheral will adjust Render delay!\n");
-		return;
+		uint32_t t_play_local = *((uint32_t *)(m_sync_buffer_big.list[i].t_play100));
+		uint32_t t_play_remote = *((uint32_t *)(list.list[i].t_play100));
+		int32_t t_lro =(int)(t_play_remote) - (int)(t_play_local);
+
+		if (t_play_local > t_play_remote)
+		{
+			num_behind++;
+			time_dif_list[i]= 0xFFFFFFFF;
+		}
+		else
+		{
+			time_dif_list[i]= t_play_remote - t_play_local;
+			if (time_dif_list[i] < time_dif)
+			{
+				time_dif = time_dif_list[i];
+				time_dif_index = i;
+			}
+		}
+
+		PRINTF("Num: %d, local:%d, remote: %d time_dif: %d\n",i,t_play_local,t_play_remote,t_lro);
 	}
 
-	uint32_t time_dif = remote_sync - m_local_sync;
+	if (num_behind > 1)
+	{
+		PRINTF("The other peripheral is the leading device and will correct left-right-offset!\n");
+		return false;
+	}
+
 	if (time_dif > 20000)
 	{
 		PRINTF("Delay > 1 conn_int!\n");
 		time_dif -= 20000;
 	}
 
+
+
     NVIC_EnableIRQ(TIMER_IRQn(TIMER_SIMUL));
 
 
     m_samples_to_correct = (uint16_t)((double)(time_dif * 16129 / 1000000)+0.5);
-	PRINTF("Time Dif: %d us. Samples: %d SeqNum: %d\n",time_dif,seqNum,m_samples_to_correct);
+
+    uint16_t dma_cnt_local = *((uint16_t*)(m_sync_buffer_big.list[time_dif_index].od_cnt));
+    uint16_t dma_cnt_remote = *((uint16_t*)(list.list[time_dif_index].od_cnt));
+    uint16_t dma_cnt_dif = 0;
+
+    if (dma_cnt_local > dma_cnt_remote)
+    {
+    	dma_cnt_dif = dma_cnt_local - dma_cnt_remote;
+    }
+    else dma_cnt_dif = 640 - dma_cnt_remote +dma_cnt_local;
+
+    dma_cnt_dif %= 322;
+
+
+
+	PRINTF("Time Dif: %d us. Samples: %d DmaDif:%d\n",time_dif,m_samples_to_correct,dma_cnt_dif);
 
 	DMA->CTRL0[OD_IN_IDX] |= (1U << DMA_CTRL0_COMPLETE_INT_ENABLE_Pos);
 	NVIC_SetPriority(DMA0_IRQn,0);
 	NVIC_EnableIRQ(DMA0_IRQn);
+
+	return true;
 }
 
 
 uint8_t *APP_GetSyncInfo(void)
 {
-	return m_sync_buffer;
+	return (uint8_t*)m_sync_buffer_big.list;
 }
 
 
@@ -219,7 +458,8 @@ void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqN
     // sync tracking
     if (seqNum == 1)
     {
-    	//Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
+    	Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
+        Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
     }
     if( ((uint8_t) (seqNum - seqNum_prev - 1)) != 0 ) {
     //    PRINTF("\r\n APP_Audio_Transfer: seqNum_prev = %d, seqNum = %d\r\n", seqNum_prev, seqNum);
@@ -254,10 +494,8 @@ void APP_Audio_Transfer(uint8_t *audio_buff, uint16_t audio_length, uint8_t seqN
     	APP_Audio_Start();
     	seqNum_prev_stream = seqNum-1;
     	PRINTF("Save seqNumPrev:%d!\n",seqNum_prev_stream);
-
     }
 
-   // Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
 
 	APP_EstablishBinauralSyncLink();
 }
@@ -327,24 +565,14 @@ void APP_Audio_Start(void)
     Sys_DMA_ChannelDisable(ASRC_OUT_IDX);
     Sys_DMA_ChannelDisable(OD_IN_IDX);
 
-	Sys_DMA_ChannelEnable(OD_IN_IDX);
-
-    Sys_Timers_Stop(1U << TIMER_START_STREAM);
-	if (asha_env.con_int == 8)
-	{
-		 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (10000*(ASHA_L2CC_INITIAL_CREDITS-2) - 1) |   TIMER_SLOWCLK_DIV2);
-	}
-	else
-	{
-		 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (20000*(ASHA_L2CC_INITIAL_CREDITS-3) - 1) |   TIMER_SLOWCLK_DIV2);
-	}
-
-	Sys_Timers_Start(1U << TIMER_START_STREAM);
-
     /* Enable ASRC block */
     Sys_ASRC_StatusConfig(ASRC_ENABLE);
 
+	NVIC_DisableIRQ(RF_RXSTOP_IRQn);
+	RF_REG_WRITE(IRQ_CONF, 0x0);
+	m_audio_state = AUDIO_START;
     env_audio.state = LINK_ESTABLISHED;
+
 }
 
 void APP_Audio_Disconnect(void)
@@ -354,7 +582,6 @@ void APP_Audio_Disconnect(void)
 
     Reset_Audio_Sync_Param(&env_sync, &env_audio);
 
-    m_start_rendering = 0;
 
     memset(od_out_buffer,0,OD_OUT_BUFFER_SIZE* sizeof(int16_t));
 
@@ -389,6 +616,8 @@ void APP_Audio_Disconnect(void)
     APP_Audio_FlushQueue();
 
     Sys_ASRC_StatusConfig(ASRC_DISABLE);
+
+    m_audio_state = AUDIO_IDLE;
 
     env_audio.state = LINK_DISCONNECTED;
 }
@@ -453,7 +682,7 @@ void APP_ResetPrevSeqNumber(void)
 static void render_timer_for_10ms()
 {
     // break here when the buffer is not yet filled completly
-    if (!m_start_rendering)
+    if (m_audio_state != AUDIO_PLAY)
     {
     	asrc_reconfig(&env_sync);
     	return;
@@ -513,7 +742,7 @@ static void render_timer_for_20ms()
 
 
 	// break here when the buffer is not yet filled completly
-    if (!m_start_rendering)
+    if (m_audio_state != AUDIO_PLAY)
     {
     	asrc_reconfig(&env_sync);
     	state = FIRST_FRAME;
@@ -563,7 +792,7 @@ static void render_timer_for_20ms()
 			 // render tracking
 			 if (seq_num == 1)
 			 {
-				 Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
+				 //Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
 			 }
 
 		 }
@@ -636,12 +865,10 @@ void TIMER_IRQ_FUNC(TIMER_RENDER)(void)
     	render_timer_for_20ms();
     }
 
-    if (!m_start_rendering)
+    if (m_audio_state != AUDIO_PLAY)
     {
     	return;
     }
-
-
 
     env_sync.timer_free_run = true;
 
@@ -677,17 +904,37 @@ void TIMER_IRQ_FUNC(TIMER_RENDER)(void)
     lpdsp32.channels.action &= ~DECODE_RESET;
 
     env_sync.cntr_connection++;
-    Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
+    //Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
 }
 
 
 void TIMER_IRQ_FUNC(TIMER_START_STREAM)(void)
 {
-	Sys_Timers_Stop(1U << TIMER_START_STREAM);
-	m_start_rendering = true;
-	NVIC_DisableIRQ(TIMER_IRQn(TIMER_START_STREAM));
 
-	Sys_DMA_ChannelEnable(ASRC_OUT_IDX);
+	Sys_Timers_Stop(1U << TIMER_START_STREAM);
+
+	if (m_audio_state == AUDIO_START)
+	{
+		if (asha_env.con_int == 8)
+		{
+			 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (10000 - 1) |   TIMER_SLOWCLK_DIV2);
+		}
+		else
+		{
+			 Sys_Timer_Set_Control(TIMER_START_STREAM, TIMER_FREE_RUN | (20000 - 1) |   TIMER_SLOWCLK_DIV2);
+		}
+		Sys_Timers_Start(1U << TIMER_START_STREAM);
+		Sys_DMA_ChannelEnable(OD_IN_IDX);
+		m_audio_state = AUDIO_ENABLE;
+
+	}
+	else if (m_audio_state == AUDIO_ENABLE)
+	{
+		NVIC_DisableIRQ(TIMER_IRQn(TIMER_START_STREAM));
+		Sys_DMA_ChannelEnable(ASRC_OUT_IDX);
+		m_audio_state = AUDIO_PLAY;
+		Sys_GPIO_Set_Low(GPIO_DBG_PACK_STREAM);
+	}
 }
 
 
@@ -823,6 +1070,7 @@ void DMA0_IRQHandler()
  * ------------------------------------------------------------------------- */
 void AUDIOSINK_PHASE_IRQHandler(void)
 {
+
 
 
 #if SIMUL

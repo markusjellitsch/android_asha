@@ -188,6 +188,25 @@ typedef struct
     uint16_t asrc_output_cnt;
 } audio_frame_param_t;
 
+typedef struct
+{
+	uint8_t t_play100[4];
+	uint8_t od_cnt[2];
+}asha_sync_info_t;
+
+typedef struct
+{
+	asha_sync_info_t list[3];
+}asha_sync_info_list;
+
+typedef enum
+{
+	AUDIO_IDLE,
+	AUDIO_START,
+	AUDIO_ENABLE,
+	AUDIO_PLAY
+}audio_state_t;
+
 extern sync_param_t env_sync;
 extern audio_frame_param_t env_audio;
 
@@ -315,7 +334,7 @@ void APP_ComputeSyncInfo(void);
 
 uint8_t *APP_GetSyncInfo(void);
 
-void APP_CorrectLeftRightOffset(uint32_t remote_sync,uint8_t seqNum);
+bool APP_CorrectLeftRightOffset(asha_sync_info_list sync,uint8_t numEntries);
 
 void APP_StartTxSyncCapture(void);
 

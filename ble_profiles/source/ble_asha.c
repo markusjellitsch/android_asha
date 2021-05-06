@@ -267,8 +267,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
         	{
         		if (evt->status == 0)
         		{
-        			PRINTF("Send Sync Info\n");
-        			L2CC_LecbSduSendCmd(conidx,asha_env.peer_cid_sync,5,APP_GetSyncInfo());
+           			L2CC_LecbSduSendCmd(1,asha_env.peer_cid_sync,sizeof(asha_sync_info_list),APP_GetSyncInfo());
         		}
         		PRINTF("L2CC_CMP_EVT: op:%d , status %d\n",evt->operation,evt->status);
         	}
@@ -285,6 +284,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
             asha_env.audioStatusPoint = 0;
             if(ind->le_psm == ASHA_LE_PSM)
             {
+
                 asha_env.local_cid = ind->local_cid;
                 asha_env.peer_cid = ind->peer_cid;
 
@@ -319,15 +319,12 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
             else
             {
 
-            	uint32_t * remote_sync_info = (uint32_t*)(p->sdu.data);
-            	uint8_t * seqNum = (uint8_t*)(p->sdu.data+4);
-				PRINTF("Received Sync! %d \n",*remote_sync_info);
-				if (asha_side == ASHA_CAPABILITIES_SIDE_LEFT)
+            	asha_sync_info_list t_play100_list = *((asha_sync_info_list *)(p->sdu.data));
+
+				if (APP_CorrectLeftRightOffset(t_play100_list,3))
 				{
 					GAPC_DisconnectCmd(conidx,CO_ERROR_REMOTE_USER_TERM_CON);
 				}
-
-				APP_CorrectLeftRightOffset(*remote_sync_info,*seqNum);
             }
         }
         break;
