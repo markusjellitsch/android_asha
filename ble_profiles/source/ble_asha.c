@@ -1,3 +1,4 @@
+
 /* ----------------------------------------------------------------------------
  * Copyright (c) 2018 Semiconductor Components Industries, LLC (d/b/a
  * ON Semiconductor), All Rights Reserved
@@ -25,7 +26,7 @@
 #include <app_audio.h>
 
 
-extern uint8_t asha_side;
+
 
 /* Global variable definition */
 struct ASHA_Env_t asha_env;
@@ -240,22 +241,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
 
                 asha_env.conidx = conidx;
             }
-            else if (p->le_psm == ASHA_LE_PSM_SYNC)
-            {
-            	struct l2cc_lecb_connect_req_ind const *ind = (struct l2cc_lecb_connect_req_ind const *)param;
 
-				struct l2cc_lecb_connect_cfm cfm = {
-					.le_psm = ind->le_psm,
-					.peer_cid = ind->peer_cid,
-					.local_mps = ind->peer_mps,
-					.local_mtu = ind->peer_mtu,
-					.accept = true,
-					.local_cid = 0,
-					.local_credit = 8,
-				};
-
-				L2CC_LecbConnectCfm(conidx, &cfm);
-            }
         }
         break;
 
@@ -265,10 +251,7 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
 
         	if (evt->operation == L2CC_LECB_CONNECT)
         	{
-        		if (evt->status == 0)
-        		{
-           			L2CC_LecbSduSendCmd(1,asha_env.peer_cid_sync,sizeof(asha_sync_info_list),APP_GetSyncInfo());
-        		}
+
         		PRINTF("L2CC_CMP_EVT: op:%d , status %d\n",evt->operation,evt->status);
         	}
         	else if ((evt->operation == L2CC_LECB_SDU_SEND) && (evt->status != 0))
@@ -316,16 +299,8 @@ void ASHA_MsgHandler(ke_msg_id_t const msg_id, void const *param,
             	rcv_p = (void*)param+offsetof(struct l2cc_lecb_sdu_recv_ind, sdu.credit);
             	asha_env.appCallback(ASHA_AUDIO_RCVD, rcv_p);
             }
-            else
-            {
 
-            	asha_sync_info_list t_play100_list = *((asha_sync_info_list *)(p->sdu.data));
 
-				if (APP_CorrectLeftRightOffset(t_play100_list,3))
-				{
-					GAPC_DisconnectCmd(conidx,CO_ERROR_REMOTE_USER_TERM_CON);
-				}
-            }
         }
         break;
     }

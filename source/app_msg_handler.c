@@ -93,13 +93,16 @@ void APP_ASHA_CallbackHandler(enum ASHA_Operation_t op, void *param)
                 {
                 	asha_env.binaural = false;
                 }
+//
+                Sys_GPIO_Set_High(GPIO_DBG_ASRC_ISR);
 
-                SYSCTRL_RF_ACCESS_CFG->RF_IRQ_ACCESS_ALIAS = RF_IRQ_ACCESS_ENABLE_BITBAND;
-                *((uint32_t *)BB_COEXIFCNTL0_BASE) = 0x1;
-            	Sys_GPIO_Set_High(GPIO_DBG_PACK_STREAM);
-            	RF_REG_WRITE(IRQ_CONF, 0x2);
-                NVIC_EnableIRQ(RF_RXSTOP_IRQn);
-                NVIC_SetPriority(RF_RXSTOP_IRQn,0);
+
+//                SYSCTRL_RF_ACCESS_CFG->RF_IRQ_ACCESS_ALIAS = RF_IRQ_ACCESS_ENABLE_BITBAND;
+//                *((uint32_t *)BB_COEXIFCNTL0_BASE) = 0x1;
+//            	RF_REG_WRITE(IRQ_CONF, 0x2);
+//                NVIC_EnableIRQ(RF_RXSTOP_IRQn);
+//                NVIC_SetPriority(RF_RXSTOP_IRQn,0);
+
             }
         }
         break;
@@ -253,7 +256,8 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
     {
         case GAPC_CONNECTION_REQ_IND:
         {
-
+        	//Sys_GPIO_Set_High(GPIO_DBG_ASRC_ISR);
+        	//Sys_GPIO_Set_Low(GPIO_DBG_ASRC_ISR);
             const struct gapc_connection_req_ind* p = param;
             PRINTF("\r\nGAPC_CONNECTION_REQ_IND: con_interval=%d, con_latency = %d, sup_to = %d, clk_accuracy = %d",
                     p->con_interval,
@@ -281,29 +285,7 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
             }
 
             if (conidx == 0) asha_env.con_int = p->con_interval;
-            else if (conidx ==1)
-            {
-            	APP_StartTxSyncCapture();
-            	Sys_GPIO_Set_High(GPIO_DBG_PACK_RECV);
-            	PRINTF("Binaural Link Connected\n");
-            	Sys_GPIO_Set_Low(GPIO_DBG_PACK_RECV);
 
-            if (asha_side <= ASHA_CAPABILITIES_SIDE_RIGHT){
-            PRINTF("Start l2CAP Link\n");
-            struct l2cc_lecb_connect_cmd cmd;
-
-			cmd.le_psm = ASHA_LE_PSM_SYNC;
-			cmd.pkt_id = 0;
-			cmd.local_mtu = 100;
-			cmd.local_mps = 100;
-			cmd.local_cid = 0;
-			cmd.local_credit = 0xFFFF;
-			cmd.operation = L2CC_LECB_CONNECT;
-
-            L2CC_LecbConnectCmd(conidx, &cmd);
-            }
-
-            }
         }
         break;
 
@@ -330,7 +312,7 @@ void ble_gapc_main_handler(ke_msg_id_t const msg_id, void const *param,
 
         case GAPC_PARAM_UPDATE_REQ_IND:
         {
-            GAPC_ParamUpdateCfm(conidx, true, 0xFF, 0xFF);
+            GAPC_ParamUpdateCfm(conidx, true, 0xFFFF, 0xFFFF);
 
             PRINTF("\r\nGAPC_PARAM_UPDATE_REQ_IND: intv_min=%d, intv_max = %d, latency = %d, time_out = %d",
             		((struct gapc_conn_param*) param)->intv_min,

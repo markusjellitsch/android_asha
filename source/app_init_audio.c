@@ -147,7 +147,7 @@ void Audio_Initialize_System(void)
     /// audiosink clock counter configuration
     Sys_Audiosink_ResetCounters();
     Sys_Audiosink_InputClock(0,AUDIOSINK_CLK_SRC_DMIC_OD);
-    Sys_Audiosink_Config(AUDIO_SINK_PERIODS_16, 0, 0);
+    Sys_Audiosink_Config(AUDIO_SINK_PERIODS_1, 0, 0);
     Sys_BBIF_SyncConfig(SYNC_ENABLE | SYNC_SOURCE_BLE_RX, 0, SLAVE_CONNECT);
 
     /// reset audio sink parameters

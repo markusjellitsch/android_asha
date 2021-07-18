@@ -83,8 +83,8 @@ struct gapm_set_dev_config_cmd devConfigCmd =
     .max_mps = GAPM_DEFAULT_MPS_MAX,
     .max_nb_lecb = 3,
     .audio_cfg = GAPM_DEFAULT_AUDIO_CFG,
-    .tx_pref_rates = GAP_RATE_LE_2MBPS,
-    .rx_pref_rates = GAP_RATE_LE_2MBPS
+    .tx_pref_rates = GAP_RATE_LE_1MBPS,
+    .rx_pref_rates = GAP_RATE_LE_1MBPS
 };
 
 struct gapm_start_advertise_cmd advertiseCmd =

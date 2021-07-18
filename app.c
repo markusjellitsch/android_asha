@@ -24,6 +24,7 @@
 #include <app.h>
 #include <output_driver.h>
 #include <app_audio.h>
+#include <app_audio_playback_sync.h>
 
 // Second Data Block
 #define DATA_BASE_ADDR              (0x3F000)
@@ -85,12 +86,12 @@ struct gapm_start_connection_cmd startConnectionCmd =
 
     .scan_interval = 10,
     .scan_window = 10,
-    .con_intv_min = GAPM_DEFAULT_CON_INTV_MIN+1,
-    .con_intv_max = GAPM_DEFAULT_CON_INTV_MAX+1,
+    .con_intv_min = 80,
+    .con_intv_max = 80,
     .con_latency = GAPM_DEFAULT_CON_LATENCY,
     .superv_to = GAPM_DEFAULT_SUPERV_TO,
-    .ce_len_min = 0x6,
-    .ce_len_max = 0x6,
+    .ce_len_min = 0x3,
+    .ce_len_max = 0x3,
     .nb_peers = 1,
     .peers =  {{APP_BD_ADDRESS,APP_BD_ADDRESS_TYPE},}
 };
@@ -138,7 +139,8 @@ int main(void)
 {
 
     /* Configure hardware and initialize BLE stack */
-    ble_init();
+
+	ble_init();
 
     TRACE_INIT();
 
@@ -147,6 +149,9 @@ int main(void)
 
     Sys_Delay_ProgramROM(SystemCoreClock / 10);
 
+
+	devConfigCmd.max_nb_lecb = 3;
+
     PRINTF("\r\n==============================================\n");
     if (DIO_DATA->ALIAS[GPIO_READ_SIDE] == 1)
     {
@@ -154,15 +159,21 @@ int main(void)
     	asha_side = ASHA_CAPABILITIES_SIDE_RIGHT;
     	devConfigCmd.addr.addr[5] = 0xD6;
     	devConfigCmd.role = GAP_ROLE_ALL;
+    	devConfigCmd.max_nb_lecb = 3;
     }
     else
     {
     	PRINTF("\r\n===== Initializing ble_android_asha LEFT =====\n");
+    	asha_side = ASHA_CAPABILITIES_SIDE_LEFT;
+    	devConfigCmd.role = GAP_ROLE_PERIPHERAL;
+
     }
     PRINTF("\r\n==============================================\r\n");
 
     /* Run the following command when erasing flash/bond_list is desirable */
     //BondList_RemoveAll();
+
+    app_aps_init();
 
     /* Configure application-specific advertising data and scan response  data*/
     APP_SetAdvScanData();

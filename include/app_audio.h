@@ -174,7 +174,25 @@ typedef struct
     uint8_t cntr_connection;
     uint8_t cntr_transient;
     bool timer_free_run;
+    uint16_t sink_cnt_render;
+    uint16_t period_cnt_render;
+    uint16_t phase_cnt_render;
 } sync_param_t;
+
+typedef enum
+{
+	AUDIO_IDLE,
+	AUDIO_START,
+	AUDIO_ENABLE,
+	AUDIO_WAIT,
+	AUDIO_PLAY
+}audio_state_t;
+
+typedef enum
+{
+	FIRST_FRAME,
+	SECOND_FRAME
+}render_state_t;
 
 typedef struct
 {
@@ -185,27 +203,13 @@ typedef struct
     int16_t *frame_dec;
     Packet_State packet_state;
     bool proc;
+    uint8_t onset_cnt;
     uint16_t asrc_output_cnt;
+    audio_state_t audio_state;
+    render_state_t render_state;
+    bool binaural_active;
 } audio_frame_param_t;
 
-typedef struct
-{
-	uint8_t t_play100[4];
-	uint8_t od_cnt[2];
-}asha_sync_info_t;
-
-typedef struct
-{
-	asha_sync_info_t list[3];
-}asha_sync_info_list;
-
-typedef enum
-{
-	AUDIO_IDLE,
-	AUDIO_START,
-	AUDIO_ENABLE,
-	AUDIO_PLAY
-}audio_state_t;
 
 extern sync_param_t env_sync;
 extern audio_frame_param_t env_audio;
@@ -223,7 +227,7 @@ extern LPDSP32Context lpdsp32;
 #define REGUL_TIME_US              200//160//
 
 /* Rendering time uses in micro-seconds */
-#define RENDER_TIME_US             4500
+#define RENDER_TIME_US             3500
 
 /* Audio interval simulation time uses in micro-seconds */
 #define SIMUL_TIME_US           10000//7500
@@ -236,7 +240,7 @@ extern LPDSP32Context lpdsp32;
 
 #define SIMUL                   0
 
-#define TIMER_SIMUL             1
+#define TIMER_START_APS         1
 #define TIMER_START_STREAM      2
 #define TIMER_RENDER            3
 
@@ -302,7 +306,7 @@ void TIMER_IRQ_FUNC(TIMER_START_STREAM)(void);
 
 void TIMER_IRQ_FUNC(TIMER_RENDER) (void);
 
-void TIMER_IRQ_FUNC(TIMER_SIMUL)(void);
+void TIMER_IRQ_FUNC(TIMER_START_APS)(void);
 
 void AUDIOSINK_PHASE_IRQHandler(void);
 
@@ -328,16 +332,9 @@ void APP_Audio_Disconnect(void);
 
 void APP_Audio_FlushQueue(void);
 
-bool APP_EstablishBinauralSyncLink(void);
-
-void APP_ComputeSyncInfo(void);
-
-uint8_t *APP_GetSyncInfo(void);
-
-bool APP_CorrectLeftRightOffset(asha_sync_info_list sync,uint8_t numEntries);
-
-void APP_StartTxSyncCapture(void);
-
+audio_frame_param_t * APP_Audio_GetInstance(void);
+uint8_t APP_GetSeqNum(void);
+void APP_CorrectAudioStream(uint16_t samples);
 
 /* ----------------------------------------------------------------------------
  * Close the 'extern "C"' block
